@@ -8,9 +8,11 @@ import io.github.yuemenglong.pack.jvm.common.StreamReader
 import io.github.yuemenglong.pack.jvm.struct.ClassFile
 import org.apache.commons.cli._
 
+import scala.util.matching.Regex
+
 case class PackItem(file: String, clazz: String, pkg: String, jar: String)
 
-class Pack(libDir: String, clazzDir: String) {
+class Pack(libDir: String, clazzDir: String, pattern: String = null) {
   // class -> jar
   val libMap: Map[String, String] = scanLibJar(libDir)
   // file, package, jar
@@ -58,16 +60,19 @@ class Pack(libDir: String, clazzDir: String) {
     }
 
     dir.listFiles().filter(_.getName.endsWith(".class"))
-      .map(f => {
-        val file = f.getAbsolutePath
-        val clazz = getFullNameFromClassFile(new FileInputStream(f))
-        val pkg = clazz.split("/").dropRight(1).mkString("/")
-        val jar = libMap.contains(clazz) match {
-          case true => libMap(clazz)
-          case false => libMap(outerClazz(clazz))
-        }
-        PackItem(file, clazz, pkg, jar)
-      })
+      .filter(f => pattern match {
+        case null => true
+        case p => f.getName.matches(p)
+      }).map(f => {
+      val file = f.getAbsolutePath
+      val clazz = getFullNameFromClassFile(new FileInputStream(f))
+      val pkg = clazz.split("/").dropRight(1).mkString("/")
+      val jar = libMap.contains(clazz) match {
+        case true => libMap(clazz)
+        case false => libMap(outerClazz(clazz))
+      }
+      PackItem(file, clazz, pkg, jar)
+    })
   }
 
   def checkBackup(): Unit = {
@@ -122,13 +127,17 @@ object Main {
 
     val options = new Options
 
-    val input = new Option("lib", true, "To Update Jar Lib Dir")
-    input.setRequired(true)
-    options.addOption(input)
+    val libOpt = new Option("lib", true, "To Update Jar Lib Dir")
+    libOpt.setRequired(true)
+    options.addOption(libOpt)
 
-    val output = new Option("dir", true, "Class File Dir")
-    output.setRequired(true)
-    options.addOption(output)
+    val dirOpt = new Option("dir", true, "Class File Dir")
+    dirOpt.setRequired(true)
+    options.addOption(dirOpt)
+
+    val regOpt = new Option("file", true, "File Name Pattern")
+    regOpt.setRequired(false)
+    options.addOption(regOpt)
 
     val parser = new DefaultParser
     val formatter = new HelpFormatter
@@ -149,8 +158,14 @@ object Main {
     }
     println(s"Lib: ${libDir}")
     println(s"Dir: ${clazzDir}")
+    val pattern = cmd.getOptionValue("file") match {
+      case null => null
+      case s =>
+        println(s"File: ${s}")
+        s
+    }
     //    "D:\\workspace\\scala\\scala-test\\target\\classes\\test"
-    val p = new Pack(libDir, clazzDir)
+    val p = new Pack(libDir, clazzDir, pattern)
     p.pack()
   }
 }
