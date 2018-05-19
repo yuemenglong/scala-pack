@@ -12,7 +12,7 @@ import scala.util.matching.Regex
 
 case class PackItem(file: String, clazz: String, pkg: String, jar: String)
 
-class Pack(libDir: String, clazzDir: String, pattern: String = null) {
+class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean = false) {
   // class -> jar
   val libMap: Map[String, String] = scanLibJar(libDir)
   // file, package, jar
@@ -88,12 +88,32 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null) {
   }
 
   def update(): Unit = {
+    val curDir = System.getProperty("user.dir")
+    println(s"Current Dir: [${curDir}]")
+    //    packItems.groupBy(_.jar).foreach { case (jar, arr) =>
+    //      val batch = arr.map(item => {
+    //        val pkgPath = Paths.get(curDir, item.pkg)
+    //        val rootPkgPath = Paths.get(curDir, item.pkg.split("/")(0))
+    //        exec(s"mkdir -p ${pkgPath}")
+    //        rm match {
+    //          case true => exec(s"mv ${item.file} ${pkgPath}")
+    //          case false => exec(s"cp ${item.file} ${pkgPath}")
+    //        }
+    //        (item.clazz, rootPkgPath)
+    //      })
+    //      val (clazzs, roots) = batch.unzip
+    //      exec(s"jar -uvf ${jar} ${clazzs.mkString(" ")}")
+    //      exec(s"rm -rf ${roots.toSet.mkString(" ")}")
+    //    }
     packItems.foreach(item => {
-      val pkgPath = Paths.get(clazzDir, item.pkg)
-      val rootPkgPath = Paths.get(clazzDir, item.pkg.split("/")(0))
+      val pkgPath = Paths.get(curDir, item.pkg)
+      val rootPkgPath = Paths.get(curDir, item.pkg.split("/")(0))
       exec(s"mkdir -p ${pkgPath}")
-      exec(s"mv ${item.file} ${pkgPath}")
-      exec(s"jar -uvf ${item.jar} -C ${clazzDir} ${item.clazz}")
+      rm match {
+        case true => exec(s"mv ${item.file} ${pkgPath}")
+        case false => exec(s"cp ${item.file} ${pkgPath}")
+      }
+      exec(s"jar -uvf ${item.jar} -C ${curDir} ${item.clazz}")
       exec(s"rm -rf ${rootPkgPath}")
     })
   }
@@ -114,6 +134,7 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null) {
       val br = new BufferedReader(new InputStreamReader(ex.getErrorStream))
       val err = Stream.continually(br.readLine()).takeWhile(_ != null).mkString("\n")
       if (err.length > 0) {
+        println(err)
         throw new Exception(err)
       }
     }
@@ -139,11 +160,16 @@ object Main {
     regOpt.setRequired(false)
     options.addOption(regOpt)
 
+    val rmOpt = new Option("rm", false, "Need Remove Class File")
+    regOpt.setRequired(false)
+    options.addOption(rmOpt)
+
     val parser = new DefaultParser
     val formatter = new HelpFormatter
     val cmd: CommandLine = try {
       parser.parse(options, args)
-    } catch {
+    }
+    catch {
       case _: Throwable =>
         formatter.printHelp("scala-pack", options)
         System.exit(1)
@@ -156,8 +182,11 @@ object Main {
     val clazzDir = cmd.getOptionValue("dir") match {
       case s => new File(s).getAbsolutePath
     }
+    val rm = cmd.hasOption("rm")
+
     println(s"Lib: ${libDir}")
     println(s"Dir: ${clazzDir}")
+    println(s"Rm: ${rm}")
     val pattern = cmd.getOptionValue("file") match {
       case null => null
       case s =>
@@ -165,7 +194,8 @@ object Main {
         s
     }
     //    "D:\\workspace\\scala\\scala-test\\target\\classes\\test"
-    val p = new Pack(libDir, clazzDir, pattern)
+    val p = new Pack(libDir, clazzDir, pattern, rm)
     p.pack()
   }
+
 }
