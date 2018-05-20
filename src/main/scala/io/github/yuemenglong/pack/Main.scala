@@ -1,14 +1,14 @@
 package io.github.yuemenglong.pack
 
 import java.io._
-import java.nio.file.Paths
+import java.nio.file.Files
 import java.util.jar.JarFile
+import java.util.zip.{ZipEntry, ZipInputStream, ZipOutputStream}
 
 import io.github.yuemenglong.pack.jvm.common.StreamReader
 import io.github.yuemenglong.pack.jvm.struct.ClassFile
 import org.apache.commons.cli._
-
-import scala.util.matching.Regex
+import org.apache.commons.io.FileUtils
 
 case class PackItem(file: String, clazz: String, pkg: String, jar: String)
 
@@ -17,6 +17,8 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean
   val libMap: Map[String, String] = scanLibJar(libDir)
   // file, package, jar
   val packItems: Array[PackItem] = scanLocalClass(clazzDir)
+
+  val curDir: String = System.getProperty("user.dir")
 
   def outerClazz(clazz: String): String = {
     val items = clazz.split("/")
@@ -34,14 +36,18 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean
     }
     dir.listFiles().filter(_.getName.endsWith(".jar")).flatMap(file => {
       val jarFile = new JarFile(file)
-      val entries = jarFile.entries()
-      Stream.continually({
-        entries.hasMoreElements match {
-          case true => entries.nextElement()
-          case false => null
-        }
-      }).takeWhile(_ != null).filter(_.getName.endsWith(".class"))
-        .map(f => (f.getName, file.getAbsolutePath))
+      try {
+        val entries = jarFile.entries()
+        Stream.continually({
+          entries.hasMoreElements match {
+            case true => entries.nextElement()
+            case false => null
+          }
+        }).takeWhile(_ != null).filter(_.getName.endsWith(".class"))
+          .map(f => (f.getName, file.getAbsolutePath)).toArray[(String, String)]
+      } finally {
+        jarFile.close()
+      }
     }).toMap
   }
 
@@ -75,70 +81,76 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean
     })
   }
 
+  def pipe(is: InputStream, os: OutputStream): Unit = {
+    val buffer = new Array[Byte](4 * 1024)
+    Stream.continually(is.read(buffer)).takeWhile(_ >= 0).foreach(read => {
+      os.write(buffer, 0, read)
+    })
+  }
+
   def checkBackup(): Unit = {
     packItems.map(_.jar).toSet[String].foreach(path => {
       val backPath = s"${path}.bak"
       if (!new File(backPath).exists()) {
         println(s"[${path}] BackUp")
-        exec(s"cp ${path} ${backPath}")
+        FileUtils.copyFile(new File(path), new File(backPath))
+        //        exec(s"cp ${path} ${backPath}")
       } else {
         println(s"[${backPath}] Exists")
       }
     })
   }
 
-  def update(): Unit = {
-    val curDir = System.getProperty("user.dir")
-    println(s"Current Dir: [${curDir}]")
-    //    packItems.groupBy(_.jar).foreach { case (jar, arr) =>
-    //      val batch = arr.map(item => {
-    //        val pkgPath = Paths.get(curDir, item.pkg)
-    //        val rootPkgPath = Paths.get(curDir, item.pkg.split("/")(0))
-    //        exec(s"mkdir -p ${pkgPath}")
-    //        rm match {
-    //          case true => exec(s"mv ${item.file} ${pkgPath}")
-    //          case false => exec(s"cp ${item.file} ${pkgPath}")
-    //        }
-    //        (item.clazz, rootPkgPath)
-    //      })
-    //      val (clazzs, roots) = batch.unzip
-    //      exec(s"jar -uvf ${jar} ${clazzs.mkString(" ")}")
-    //      exec(s"rm -rf ${roots.toSet.mkString(" ")}")
-    //    }
-    packItems.foreach(item => {
-      val pkgPath = Paths.get(curDir, item.pkg)
-      val rootPkgPath = Paths.get(curDir, item.pkg.split("/")(0))
-      exec(s"mkdir -p ${pkgPath}")
-      rm match {
-        case true => exec(s"mv ${item.file} ${pkgPath}")
-        case false => exec(s"cp ${item.file} ${pkgPath}")
+  def updateJar(jarPath: String, files: Array[PackItem]): Unit = {
+    println(s"Update Jar [${jarPath}]")
+    val fileMap = files.map(f => (f.clazz, f.file)).toMap
+    val jarFile = new File(jarPath)
+    val tmpFile = File.createTempFile(jarFile.getName, null, new File(curDir))
+    tmpFile.delete()
+    Files.move(jarFile.toPath, tmpFile.toPath)
+
+    val zis = new ZipInputStream(new FileInputStream(tmpFile))
+    val zos = new ZipOutputStream(new FileOutputStream(jarFile))
+    // 1. copy non update
+    Stream.continually(zis.getNextEntry).takeWhile(_ != null).foreach(f => {
+      fileMap.contains(f.getName) match {
+        case true => println(s"[${f.getName}] Need Update")
+        case false =>
+          zos.putNextEntry(f)
+          pipe(zis, zos)
       }
-      exec(s"jar -uvf ${item.jar} -C ${curDir} ${item.clazz}")
-      exec(s"rm -rf ${rootPkgPath}")
     })
+    zis.close()
+
+    // 2. copy update
+    files.foreach(item => {
+      println(s"Update [${item.clazz}]")
+      val is = new FileInputStream(item.file)
+      zos.putNextEntry(new ZipEntry(item.clazz))
+      pipe(is, zos)
+      is.close()
+      zos.closeEntry()
+    })
+    zos.close()
+
+    // 3. clear if rm option
+    if (rm) {
+      files.foreach(f => FileUtils.forceDelete(new File(f.file)))
+    }
+
+    tmpFile.delete()
+  }
+
+  def update(): Unit = {
+    println(s"Current Dir: [${curDir}]")
+    packItems.groupBy(_.jar).foreach { case (jar, arr) =>
+      updateJar(jar, arr)
+    }
   }
 
   def pack(): Unit = {
     checkBackup()
     update()
-  }
-
-  def exec(cmd: String): Unit = {
-    println(cmd)
-    val ex = Runtime.getRuntime.exec(cmd); //添加要进行的命令，"cmd  /c
-    {
-      val br = new BufferedReader(new InputStreamReader(ex.getInputStream)) //虽然cmd命令可以直接输出，但是通过IO流技术可以保证对数据进行一个缓冲。
-      Stream.continually(br.readLine()).takeWhile(_ != null).foreach(println)
-    }
-    {
-      val br = new BufferedReader(new InputStreamReader(ex.getErrorStream))
-      val err = Stream.continually(br.readLine()).takeWhile(_ != null).mkString("\n")
-      if (err.length > 0) {
-        println(err)
-        throw new Exception(err)
-      }
-    }
-
   }
 }
 
