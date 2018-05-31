@@ -16,7 +16,7 @@ object Main {
           case true =>
           case false => f.isDirectory match {
             case true => scan(f, fn)
-            case false => f.getName.endsWith(".java") match {
+            case false => f.getName.endsWith(".class") match {
               case false =>
               case true => fn(f)
             }
@@ -32,9 +32,14 @@ object Main {
   def main(args: Array[String]): Unit = {
     Args.option("dir", true, "Watch Dir")
     Args.option("to", true, "Copy Dir")
+    Args.option("t", true, "Loop Timeout", "6000")
 
-    val dir = "D:\\workspace\\hadoop-release-2.9.0-RC3"
-    val to = "D:/pack"
+    Args.parse(args)
+
+    val dir = Args.getOptionAsPath("dir")
+    val to = Args.getOptionAsPath("to")
+    val timeout = Args.getOptionValue("t").toInt
+    println(dir, to)
     var cache = {
       val ab = new ArrayBuffer[(String, Long)]
       scan(dir, (f: File) => {
@@ -50,8 +55,9 @@ object Main {
       println(s"Update ${f.getAbsolutePath}")
     }
 
+    println("Start Watch Loop")
     while (true) {
-      Thread.sleep(10 * 1000)
+      Thread.sleep(timeout)
       val start = System.currentTimeMillis()
       scan(dir, (f: File) => {
         cache.get(f.getAbsolutePath) match {
@@ -60,7 +66,7 @@ object Main {
         }
       })
       val end = System.currentTimeMillis()
-      println(s"Loop Cost ${end - start}")
+      println(s"Loop Cost ${end - start}, Files ${cache.size}")
     }
   }
 }

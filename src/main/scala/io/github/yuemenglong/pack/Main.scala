@@ -7,12 +7,12 @@ import java.util.zip.{ZipEntry, ZipInputStream, ZipOutputStream}
 
 import io.github.yuemenglong.pack.jvm.common.StreamReader
 import io.github.yuemenglong.pack.jvm.struct.ClassFile
-import org.apache.commons.cli._
+import io.github.yuemenglong.pack.kit.Args
 import org.apache.commons.io.FileUtils
 
 case class PackItem(file: String, clazz: String, pkg: String, jar: String)
 
-class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean = false) {
+class Pack(libDir: String, clazzDir: String, rm: Boolean = false) {
   // class -> jar
   val libMap: Map[String, String] = scanLibJar(libDir)
   // file, package, jar
@@ -65,11 +65,7 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean
       cf.name + ".class"
     }
 
-    dir.listFiles().filter(_.getName.endsWith(".class"))
-      .filter(f => pattern match {
-        case null => true
-        case p => f.getName.matches(p)
-      }).map(f => {
+    dir.listFiles().filter(_.getName.endsWith(".class")).map(f => {
       val file = f.getAbsolutePath
       val clazz = getFullNameFromClassFile(new FileInputStream(f))
       val pkg = clazz.split("/").dropRight(1).mkString("/")
@@ -157,56 +153,30 @@ class Pack(libDir: String, clazzDir: String, pattern: String = null, rm: Boolean
 object Main {
 
   def main(args: Array[String]): Unit = {
+    Args.option("w", false, "Watcher Mode")
 
-    val options = new Options
-
-    val libOpt = new Option("lib", true, "To Update Jar Lib Dir")
-    libOpt.setRequired(true)
-    options.addOption(libOpt)
-
-    val dirOpt = new Option("dir", true, "Class File Dir")
-    dirOpt.setRequired(true)
-    options.addOption(dirOpt)
-
-    val regOpt = new Option("file", true, "File Name Pattern")
-    regOpt.setRequired(false)
-    options.addOption(regOpt)
-
-    val rmOpt = new Option("rm", false, "Need Remove Class File")
-    regOpt.setRequired(false)
-    options.addOption(rmOpt)
-
-    val parser = new DefaultParser
-    val formatter = new HelpFormatter
-    val cmd: CommandLine = try {
-      parser.parse(options, args)
-    }
-    catch {
-      case _: Throwable =>
-        formatter.printHelp("scala-pack", options)
-        System.exit(1)
-        null
+    if (args.indexOf("-w") >= 0) {
+      watcher.Main.main(args)
+      return
     }
 
-    val libDir = cmd.getOptionValue("lib") match {
-      case s => new File(s).getAbsolutePath
-    }
-    val clazzDir = cmd.getOptionValue("dir") match {
-      case s => new File(s).getAbsolutePath
-    }
-    val rm = cmd.hasOption("rm")
+    Args.option("lib", true, "To Update Jar Lib Dir")
+    Args.option("dir", true, "Class File Dir")
+    Args.option("file", true, "File Name Pattern", null)
+    Args.option("rm", false, "Need Remove Class File")
+
+    Args.parse(args)
+
+    val libDir = Args.getOptionAsPath("lib")
+    val clazzDir = Args.getOptionAsPath("dir")
+    val rm = Args.hasOption("rm")
 
     println(s"Lib: ${libDir}")
     println(s"Dir: ${clazzDir}")
     println(s"Rm: ${rm}")
-    val pattern = cmd.getOptionValue("file") match {
-      case null => null
-      case s =>
-        println(s"File: ${s}")
-        s
-    }
+
     //    "D:\\workspace\\scala\\scala-test\\target\\classes\\test"
-    val p = new Pack(libDir, clazzDir, pattern, rm)
+    val p = new Pack(libDir, clazzDir, rm)
     p.pack()
   }
 

@@ -1,5 +1,7 @@
 package io.github.yuemenglong.pack.kit
 
+import java.io.File
+
 import org.apache.commons.cli._
 
 object Args {
@@ -35,11 +37,17 @@ object Args {
   }
 
   def getOptionValue(opt: String): String = {
-    require(cmd != null)
+    if (cmd == null) {
+      throw new Exception("Parse Args First")
+    }
     cmd.hasOption(opt) match {
       case true => cmd.getOptionValue(opt)
       case false => dftMap(opt)
     }
+  }
+
+  def getOptionAsPath(opt: String): String = {
+    new File(getOptionValue(opt)).getAbsolutePath
   }
 
   def hasOption(opt: String): Boolean = {
