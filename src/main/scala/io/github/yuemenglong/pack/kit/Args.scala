@@ -9,30 +9,35 @@ object Args {
   private var dftMap: Map[String, String] = Map()
   private var cmd: CommandLine = _
 
-  def option(opt: String, hasArg: Boolean, desc: String, dft: String = null): Unit = {
+  private val DEFAULT_FLAG = "$$$DEFAULT_FLAG$$$"
+
+  def option(opt: String, hasArg: Boolean, desc: String, dft: String = DEFAULT_FLAG): Unit = {
     val option = new Option(opt, hasArg, desc)
     (hasArg, dft) match {
       case (false, _) => //没有参数
-      case (true, null) => option.setRequired(true)
+      case (true, DEFAULT_FLAG) => option.setRequired(true) // 需要参数且没有传递默认
       case (true, _) => dftMap += (opt -> dft)
     }
     options.addOption(option)
   }
 
-  def printUsage(): Unit = {
+  def printUsage(tips: String = null): Unit = {
+    val cls = tips match {
+      case null => " "
+      case s if s.trim == "" => " "
+      case s => s"[${s}]"
+    }
     val formatter = new HelpFormatter
-    formatter.printHelp(" ", options)
+    formatter.printHelp(cls, options)
+    System.exit(-1)
   }
 
-  def parse(args: Array[String]): Unit = {
+  def parse(args: Array[String], tips: String = null): Unit = {
     val parser = new DefaultParser
-    val formatter = new HelpFormatter
     try {
-      cmd = parser.parse(options, args)
+      cmd = parser.parse(options, args, true)
     } catch {
-      case _: Throwable =>
-        formatter.printHelp(" ", options)
-        System.exit(1)
+      case _: Throwable => printUsage()
     }
   }
 
@@ -47,7 +52,10 @@ object Args {
   }
 
   def getOptionAsPath(opt: String): String = {
-    new File(getOptionValue(opt)).getAbsolutePath
+    getOptionValue(opt) match {
+      case null => null
+      case s => new File(s).getAbsolutePath
+    }
   }
 
   def hasOption(opt: String): Boolean = {

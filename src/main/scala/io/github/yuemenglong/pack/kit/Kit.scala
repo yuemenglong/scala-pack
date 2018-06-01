@@ -4,6 +4,10 @@ import java.io._
 import java.text.SimpleDateFormat
 import java.util.Date
 
+import io.github.yuemenglong.pack.PackItem
+import java.net.URL
+import java.net.URLDecoder
+
 object Kit {
   def execs(cmd: String): Stream[String] = {
     println(cmd)
@@ -53,5 +57,21 @@ object Kit {
 
   def reader(is: InputStream): BufferedReader = {
     new BufferedReader(new InputStreamReader(is))
+  }
+
+  def pipe(is: InputStream, os: OutputStream): Unit = {
+    val buffer = new Array[Byte](4 * 1024)
+    Stream.continually(is.read(buffer)).takeWhile(_ >= 0).foreach(read => {
+      os.write(buffer, 0, read)
+    })
+  }
+
+  def getThisJarFile: File = {
+    val url = classOf[PackItem].getProtectionDomain.getCodeSource.getLocation
+    val filePath = URLDecoder.decode(url.getPath, "utf-8") match {
+      case s if s.endsWith(".jar") => s.substring(0, s.lastIndexOf("/") + 1)
+      case s => s
+    }
+    new File(filePath)
   }
 }
