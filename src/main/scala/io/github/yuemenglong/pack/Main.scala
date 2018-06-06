@@ -162,6 +162,21 @@ case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
   }
 }
 
+case class Backup(items: Array[PackItem]) {
+  def exec(): Unit = {
+    items.map(_.jar).toSet[String].foreach(path => {
+      val backPath = s"${path}.bak"
+      if (!new File(backPath).exists()) {
+        println(s"[${path}] BackUp")
+        FileUtils.copyFile(new File(path), new File(backPath))
+        //        exec(s"cp ${path} ${backPath}")
+      } else {
+        println(s"[${backPath}] Exists")
+      }
+    })
+  }
+}
+
 // Do Pack
 case class Pack(items: Array[PackItem]) {
   private val workDir: File = Kit.getThisJarFile.getParentFile
@@ -374,6 +389,7 @@ object Main {
         val jars = Lib(libDir).exec()
         val clazzs = Clazz(clazzDir).exec()
         val packs = JoinPackItems(clazzs, jars).exec()
+        Backup(packs)
         Pack(packs).exec()
         if (rm) {
           Clean(clazzs).exec()
@@ -406,6 +422,7 @@ object Main {
               Copy(clazzs, to).exec()
             case _ =>
               val packs = JoinPackItems(clazzs, jars).exec()
+              Backup(packs)
               Pack(packs).exec()
           }
         }
