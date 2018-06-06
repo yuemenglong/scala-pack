@@ -51,7 +51,7 @@ case class Lib(libDir: String) {
           case false => null
         }
       }).takeWhile(_ != null).filter(_.getName.endsWith(".class"))
-        .map(f => JarItem(f.getName, file.getAbsolutePath))
+        .map(f => JarItem(f.getName, file.getAbsolutePath)).toArray
       jarFile.close()
       ret
     })
@@ -131,7 +131,10 @@ case class Watch(watchDir: String) {
 // Copy After Watch
 case class Copy(clazzs: Array[ClazzItem], to: String) {
   def exec(): Unit = {
-    clazzs.foreach(c => FileUtils.copyFileToDirectory(new File(c.file), new File(to)))
+    clazzs.foreach(c => {
+      FileUtils.copyFileToDirectory(new File(c.file), new File(to))
+      println(s"Copy ${c.file} To ${to}")
+    })
   }
 }
 
