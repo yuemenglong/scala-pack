@@ -13,12 +13,16 @@ import org.apache.commons.io.FileUtils
 
 import scala.collection.mutable.ArrayBuffer
 
+trait GetPkg {
+  val clazz: String
+  val pkg: String = clazz.split("/").dropRight(1).mkString("/")
+}
 
-case class JarItem(clazz: String, jar: String)
+case class JarItem(clazz: String, jar: String) extends GetPkg
 
-case class ClazzItem(file: String, clazz: String)
+case class ClazzItem(file: String, clazz: String) extends GetPkg
 
-case class PackItem(file: String, clazz: String, jar: String)
+case class PackItem(file: String, clazz: String, jar: String) extends GetPkg
 
 object ClazzItem {
   private def getFullNameFromClassFile(is: InputStream): String = {
@@ -140,6 +144,29 @@ case class Copy(clazzs: Array[ClazzItem], to: String) {
 
 // PackItems
 case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
+  val pkgToJar: Map[String, Set[String]] = jars.flatMap(j => {
+    val items = j.pkg.split("/")
+    (1 to items.length).map(i => {
+      (items.take(i).mkString("/"), j.jar)
+    })
+  }).groupBy(_._1).mapValues(_.map(_._2).toSet)
+
+  val clazzToJar: Map[String, String] = jars.map(o => (o.clazz, o.jar))
+    .toMap
+
+  private def findJar(pkg: String): Option[String] = {
+    val items = pkg.split("/")
+    (1 to items.length).reverse.find(i => {
+      pkgToJar.get(items.take(i).mkString("/")) match {
+        case Some(set) => set.size match {
+          case 1 => true
+          case _ => false
+        }
+        case None => false
+      }
+    }).map(i => pkgToJar(items.take(i).mkString("/")).toIndexedSeq(0))
+  }
+
   private def outerClazz(clazz: String): String = {
     val items = clazz.split("/")
     items(items.length - 1) = items(items.length - 1).split("\\$")(0) + ".class"
@@ -149,12 +176,13 @@ case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
   }
 
   def exec(): Array[PackItem] = {
-    val jarMap = jars.map(o => (o.clazz, o)).toMap
     clazzs.map(c => {
-      jarMap.get(c.clazz) match {
-        case Some(j) => PackItem(c.file, j.clazz, j.jar)
-        case None => jarMap.get(outerClazz(c.clazz)) match {
-          case Some(j) => PackItem(c.file, j.clazz, j.jar)
+      clazzToJar.get(c.clazz) match {
+        // 原本有的情况下，直接替换
+        case Some(j) => PackItem(c.file, c.clazz, j)
+        // 原来没有这个文件，找到对应的jar文件
+        case None => findJar(c.pkg) match {
+          case Some(j) => PackItem(c.file, c.clazz, j)
           case None => throw new Exception(s"No Class [${c.clazz}] In Libs")
         }
       }
@@ -178,14 +206,13 @@ case class Backup(items: Array[PackItem]) {
 }
 
 // Do Pack
-case class Pack(items: Array[PackItem]) {
-  private val workDir: File = Kit.getThisJarFile.getParentFile
+case class Pack(items: Array[PackItem], workDir: String) {
 
   private def updateJar(jarPath: String, files: Array[PackItem]): Unit = {
     println(s"Update Jar [${jarPath}]")
     val fileMap = files.map(f => (f.clazz, f.file)).toMap
     val jarFile = new File(jarPath)
-    val tmpFile = File.createTempFile(jarFile.getName, null, workDir)
+    val tmpFile = File.createTempFile(jarFile.getName, null, new File(workDir))
     tmpFile.delete()
     Files.move(jarFile.toPath, tmpFile.toPath)
 
@@ -204,7 +231,7 @@ case class Pack(items: Array[PackItem]) {
 
     // 2. copy update
     files.foreach(item => {
-      println(s"Update [${item.clazz}]")
+      println(s"Pack [${item.clazz}]")
       val is = new FileInputStream(item.file)
       zos.putNextEntry(new ZipEntry(item.clazz))
       Kit.pipe(is, zos)
@@ -217,7 +244,7 @@ case class Pack(items: Array[PackItem]) {
   }
 
   def exec(): Unit = {
-    println(s"WorkDir: ${workDir.getAbsolutePath}")
+    println(s"WorkDir: ${workDir}")
     items.groupBy(_.jar).foreach { case (jar, arr) =>
       updateJar(jar, arr)
     }
@@ -251,7 +278,7 @@ object Main {
         val clazzs = Clazz(clazzDir).exec()
         val packs = JoinPackItems(clazzs, jars).exec()
         Backup(packs).exec()
-        Pack(packs).exec()
+        Pack(packs, clazzDir).exec()
         if (rm) {
           Clean(clazzs).exec()
         }
@@ -284,7 +311,7 @@ object Main {
             case _ =>
               val packs = JoinPackItems(clazzs, jars).exec()
               Backup(packs).exec()
-              Pack(packs).exec()
+              Pack(packs, dir).exec()
           }
         }
       case _ => Args.printUsage()
