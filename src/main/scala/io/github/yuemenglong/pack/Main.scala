@@ -41,12 +41,23 @@ object ClazzItem {
 
 // Jars
 case class Lib(libDir: String) {
+  def scan(file: File): Array[File] = {
+    if (file.isFile) {
+      Array(file)
+    } else if (file.isDirectory) {
+      file.listFiles().flatMap(scan)
+    } else {
+      throw new RuntimeException("Invalid File Type")
+    }
+  }
+
   def exec(): Array[JarItem] = {
     val dir = new File(libDir)
     if (!dir.isDirectory) {
       throw new Exception(s"${libDir} Not A Dir")
     }
-    dir.listFiles().filter(_.getName.endsWith(".jar")).flatMap(file => {
+    scan(dir).filter(_.getName.endsWith(".jar")).flatMap(file => {
+      println(s"Scan Lib File: ${file}")
       val jarFile = new JarFile(file)
       val entries = jarFile.entries()
       val ret = Stream.continually({
