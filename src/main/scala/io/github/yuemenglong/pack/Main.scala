@@ -40,23 +40,28 @@ object ClazzItem {
 }
 
 // Jars
-case class Lib(libDir: String) {
-  def scan(file: File): Array[File] = {
+case class Lib(libDir: String, jarFile: String, deep: Int) {
+  def scan(file: File, deep: Int = 1): Array[File] = {
     if (file.isFile) {
       Array(file)
-    } else if (file.isDirectory) {
-      file.listFiles().flatMap(scan)
+    } else if (file.isDirectory && deep > 0) {
+      file.listFiles().flatMap(scan(_, deep - 1))
     } else {
-      throw new RuntimeException("Invalid File Type")
+      Array()
     }
   }
 
   def exec(): Array[JarItem] = {
-    val dir = new File(libDir)
-    if (!dir.isDirectory) {
-      throw new Exception(s"${libDir} Not A Dir")
+    val files = if (jarFile != null) {
+      Array(new File(jarFile))
+    } else {
+      val dir = new File(libDir)
+      if (!dir.isDirectory) {
+        throw new Exception(s"${libDir} Not A Dir")
+      }
+      scan(dir, deep)
     }
-    scan(dir).filter(_.getName.endsWith(".jar")).flatMap(file => {
+    files.filter(_.getName.endsWith(".jar")).flatMap(file => {
       println(s"Scan Lib File: ${file}")
       val jarFile = new JarFile(file)
       val entries = jarFile.entries()
@@ -148,7 +153,7 @@ case class Copy(clazzs: Array[ClazzItem], to: String) {
   def exec(): Unit = {
     clazzs.foreach(c => {
       FileUtils.copyFileToDirectory(new File(c.file), new File(to))
-      println(s"Copy ${c.file} To ${to}")
+      println(s"Copy ${new File(c.file).getName}")
     })
   }
 }
@@ -277,15 +282,23 @@ object Main {
     val mode = Args.getOptionValue("m").toLowerCase()
     mode match {
       case "p" =>
-        Args.option("lib", true, "To Update Jar Lib Dir")
+        Args.option("lib", true, "To Update Jar Lib Dir", null)
+        Args.option("jar", true, "Directly Update Jar", null)
         Args.option("dir", true, "Class File Dir")
         Args.option("rm", false, "Need Remove Class File")
+        Args.option("deep", true, "Scan Dir Deep", "1")
         Args.parse(args)
         val libDir = Args.getOptionAsPath("lib")
+        val jarFile = Args.getOptionAsPath("jar")
+        if (libDir == null && jarFile == null) {
+          Args.printUsage()
+          System.exit(0)
+        }
         val clazzDir = Args.getOptionAsPath("dir")
         val rm = Args.hasOption("rm")
+        val deep = Args.getOptionValue("deep").toInt
         println("Pick Mode", libDir, clazzDir, rm)
-        val jars = Lib(libDir).exec()
+        val jars = Lib(libDir, jarFile, deep).exec()
         val clazzs = Clazz(clazzDir).exec()
         val packs = JoinPackItems(clazzs, jars).exec()
         Backup(packs).exec()
@@ -309,7 +322,7 @@ object Main {
         }
         val jars: Array[JarItem] = lib match {
           case null => Array()
-          case _ => Lib(lib).exec()
+          case _ => Lib(lib, null, 1).exec()
         }
         val timeout = Args.getOptionValue("t").toInt
         val watch = Watch(dir)
