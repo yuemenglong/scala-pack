@@ -8,7 +8,6 @@ import java.util.zip.{ZipEntry, ZipInputStream, ZipOutputStream}
 import io.github.yuemenglong.pack.jvm.common.StreamReader
 import io.github.yuemenglong.pack.jvm.struct.ClassFile
 import io.github.yuemenglong.pack.kit.{Args, Kit}
-import io.github.yuemenglong.pack.watcher.Main.scan
 import org.apache.commons.io.FileUtils
 
 import scala.collection.mutable.ArrayBuffer
@@ -80,13 +79,6 @@ case class Lib(libDir: String, jarFile: String, deep: Int) {
 
 // Clazzs
 case class Clazz(clazzDir: String) {
-  private def getFullNameFromClassFile(is: InputStream): String = {
-    val sr = new StreamReader(is)
-    val cf = new ClassFile(sr)
-    is.close()
-    cf.name + ".class"
-  }
-
   def exec(): Array[ClazzItem] = {
     val dir = new File(clazzDir)
     if (!dir.isDirectory) {
@@ -167,10 +159,33 @@ case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
     })
   }).groupBy(_._1).mapValues(_.map(_._2).toSet)
 
-  val clazzToJar: Map[String, String] = jars.map(o => (o.clazz, o.jar))
-    .toMap
+  val clazzToJar: Map[String, String] = jars.map(o => (o.clazz, o.jar)).toMap
 
-  private def findJar(pkg: String): Option[String] = {
+  val outerClassToJar: Map[String, String] = jars.flatMap(o => o.clazz.contains("$") match {
+    case false => Array[(String, String)]()
+    case true =>
+      var pre = ""
+      o.clazz.replace(".class", "").split("\\$").map(seg => {
+        pre = pre match {
+          case "" => seg
+          case _ => pre + "$" + seg
+        }
+        (pre, o.jar)
+      })
+  }).toMap
+
+  private def findJarByOuter(clazz: String): Option[String] = {
+    if (!clazz.contains("$")) {
+      return None
+    }
+    val segs = clazz.replace(".class", "").split("\\$")
+    (1 to segs.length).reverse.find(i => {
+      val k = segs.take(i).mkString("$")
+      outerClassToJar.contains(k)
+    }).map(i => outerClassToJar(segs.take(i).mkString("$")))
+  }
+
+  private def findJarByPkg(pkg: String): Option[String] = {
     val items = pkg.split("/")
     (1 to items.length).reverse.find(i => {
       pkgToJar.get(items.take(i).mkString("/")) match {
@@ -183,12 +198,8 @@ case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
     }).map(i => pkgToJar(items.take(i).mkString("/")).toIndexedSeq(0))
   }
 
-  private def outerClazz(clazz: String): String = {
-    val items = clazz.split("/")
-    items(items.length - 1) = items(items.length - 1).split("\\$")(0) + ".class"
-    val ret = items.mkString("/")
-    println(s"[${clazz}] With Outer [${ret}]")
-    ret
+  private def findJar(c: ClazzItem): Option[String] = {
+    findJarByOuter(c.clazz).orElse(findJarByPkg(c.pkg))
   }
 
   def exec(): Array[PackItem] = {
@@ -197,7 +208,7 @@ case class JoinPackItems(clazzs: Array[ClazzItem], jars: Array[JarItem]) {
         // 原本有的情况下，直接替换
         case Some(j) => PackItem(c.file, c.clazz, j)
         // 原来没有这个文件，找到对应的jar文件
-        case None => findJar(c.pkg) match {
+        case None => findJar(c) match {
           case Some(j) => PackItem(c.file, c.clazz, j)
           case None => throw new Exception(s"No Class [${c.clazz}] In Libs")
         }
