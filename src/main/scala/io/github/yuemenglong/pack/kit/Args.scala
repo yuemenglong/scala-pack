@@ -58,6 +58,13 @@ object Args {
     }
   }
 
+  def getOptionAsPaths(opt: String): Array[String] = {
+    getOptionValue(opt) match {
+      case null => null
+      case s => s.split(";").map(s => new File(s).getAbsolutePath)
+    }
+  }
+
   def hasOption(opt: String): Boolean = {
     require(cmd != null)
     cmd.hasOption(opt)

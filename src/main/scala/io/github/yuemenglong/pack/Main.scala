@@ -39,9 +39,9 @@ object ClazzItem {
 }
 
 // Jars
-case class Lib(libDir: String, jarFile: String, deep: Int) {
+case class Lib(libs: Array[String], deep: Int) {
   def scan(file: File, deep: Int = 1): Array[File] = {
-    if (file.isFile) {
+    if (file.isFile && file.getName.endsWith(".jar")) {
       Array(file)
     } else if (file.isDirectory && deep > 0) {
       file.listFiles().flatMap(scan(_, deep - 1))
@@ -51,15 +51,13 @@ case class Lib(libDir: String, jarFile: String, deep: Int) {
   }
 
   def exec(): Array[JarItem] = {
-    val files = if (jarFile != null) {
-      Array(new File(jarFile))
-    } else {
-      val dir = new File(libDir)
-      if (!dir.isDirectory) {
-        throw new Exception(s"${libDir} Not A Dir")
+    val files = libs.flatMap(s => {
+      val dir = new File(s)
+      if (!dir.exists()) {
+        throw new Exception(s"${s} Not Exists")
       }
       scan(dir, deep)
-    }
+    })
     files.filter(_.getName.endsWith(".jar")).flatMap(file => {
       println(s"Scan Lib File: ${file}")
       val jarFile = new JarFile(file)
@@ -90,10 +88,10 @@ case class Clazz(clazzDir: String) {
 }
 
 // Watch Which Modified
-case class Watch(watchDir: String) {
+case class Watch(watchDirs: Array[String]) {
   private var cache = {
     val ab = new ArrayBuffer[(String, Long)]
-    scan(watchDir, (f: File) => {
+    scan(watchDirs, (f: File) => {
       ab += ((f.getAbsolutePath, f.lastModified()))
     })
     ab.toMap
@@ -118,12 +116,14 @@ case class Watch(watchDir: String) {
     }
   }
 
-  private def scan(path: String, fn: File => Any): Unit = scan(new File(path), fn)
+  private def scan(path: Array[String], fn: File => Any): Unit = {
+    path.foreach(s => scan(new File(s), fn))
+  }
 
   def exec(): Array[ClazzItem] = {
     val ab = new ArrayBuffer[ClazzItem]()
     val start = System.currentTimeMillis()
-    scan(watchDir, (f: File) => {
+    scan(watchDirs, (f: File) => {
       cache.get(f.getAbsolutePath) match {
         case None =>
           ab += ClazzItem(f)
@@ -294,22 +294,16 @@ object Main {
     mode match {
       case "p" =>
         Args.option("lib", true, "To Update Jar Lib Dir", null)
-        Args.option("jar", true, "Directly Update Jar", null)
         Args.option("dir", true, "Class File Dir")
         Args.option("rm", false, "Need Remove Class File")
         Args.option("deep", true, "Scan Dir Deep", "1")
         Args.parse(args)
-        val libDir = Args.getOptionAsPath("lib")
-        val jarFile = Args.getOptionAsPath("jar")
-        if (libDir == null && jarFile == null) {
-          Args.printUsage()
-          System.exit(0)
-        }
+        val libs = Args.getOptionAsPaths("lib")
         val clazzDir = Args.getOptionAsPath("dir")
         val rm = Args.hasOption("rm")
         val deep = Args.getOptionValue("deep").toInt
-        println("Pick Mode", libDir, clazzDir, rm)
-        val jars = Lib(libDir, jarFile, deep).exec()
+        println("Pick Mode", clazzDir, rm)
+        val jars = Lib(libs, deep).exec()
         val clazzs = Clazz(clazzDir).exec()
         val packs = JoinPackItems(clazzs, jars).exec()
         Backup(packs).exec()
@@ -324,29 +318,29 @@ object Main {
         Args.option("to", true, "Copy To Dir", null)
         Args.option("t", true, "Loop Timeout", "3000")
         Args.parse(args)
-        val lib = Args.getOptionAsPath("lib")
-        val dir = Args.getOptionAsPath("dir")
+        val libs = Args.getOptionAsPaths("lib")
+        val dir = Args.getOptionAsPaths("dir")
         val to = Args.getOptionAsPath("to")
-        if ((lib == null && to == null) || (lib != null && to != null)) {
+        if ((libs == null && to == null) || (libs != null && to != null)) {
           println(3)
           Args.printUsage("Lib/To Must Has Exactly One")
         }
-        val jars: Array[JarItem] = lib match {
+        val jars: Array[JarItem] = libs match {
           case null => Array()
-          case _ => Lib(lib, null, 1).exec()
+          case _ => Lib(libs, 1).exec()
         }
         val timeout = Args.getOptionValue("t").toInt
         val watch = Watch(dir)
         while (true) {
           Thread.sleep(timeout)
           val clazzs = watch.exec()
-          lib match {
+          libs match {
             case null =>
               Copy(clazzs, to).exec()
             case _ =>
               val packs = JoinPackItems(clazzs, jars).exec()
               Backup(packs).exec()
-              Pack(packs, dir).exec()
+              Pack(packs, dir(0)).exec()
           }
         }
       case _ => Args.printUsage()
