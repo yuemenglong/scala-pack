@@ -7,7 +7,7 @@ import java.util.zip.{ZipEntry, ZipInputStream, ZipOutputStream}
 
 import io.github.yuemenglong.pack.jvm.common.StreamReader
 import io.github.yuemenglong.pack.jvm.struct.ClassFile
-import io.github.yuemenglong.pack.kit.{Args, Kit}
+import io.github.yuemenglong.pack.kit.{Args, Exec, FileUtil, Kit}
 import org.apache.commons.io.FileUtils
 
 import scala.collection.mutable.ArrayBuffer
@@ -19,7 +19,11 @@ trait GetPkg {
 
 case class JarItem(clazz: String, jar: String) extends GetPkg
 
-case class ClazzItem(file: String, clazz: String) extends GetPkg
+case class ClazzItem(file: String, clazz: String) extends GetPkg {
+  def getClassPrefix: String = {
+    clazz.split("[.$]")(0)
+  }
+}
 
 case class PackItem(file: String, clazz: String, jar: String) extends GetPkg
 
@@ -88,8 +92,42 @@ case class Clazz(clazzDir: String) {
 }
 
 // Watch Which Modified
+case class Scan(dirs: Array[String]) {
+
+  private def scan(dir: File, fn: File => Any): Unit = {
+    dir.isDirectory match {
+      case true => dir.listFiles().foreach(f => {
+        f.getName.startsWith(".") match {
+          case true =>
+          case false => f.isDirectory match {
+            case true => scan(f, fn)
+            case false => f.getName.endsWith(".class") match {
+              case false =>
+              case true => fn(f)
+            }
+          }
+        }
+      })
+      case false => throw new Exception(s"${dir.getAbsolutePath} Is Not Dir")
+    }
+  }
+
+  private def scan(path: Array[String], fn: File => Any): Unit = {
+    path.foreach(s => scan(new File(s), fn))
+  }
+
+  def exec(): Array[ClazzItem] = {
+    val ab = new ArrayBuffer[ClazzItem]()
+    scan(dirs, (f: File) => {
+      ab += ClazzItem(f)
+    })
+    ab.toArray
+  }
+}
+
+// Watch Which Modified
 case class Watch(watchDirs: Array[String]) {
-  private var cache = {
+  var cache = {
     val ab = new ArrayBuffer[(String, Long)]
     scan(watchDirs, (f: File) => {
       ab += ((f.getAbsolutePath, f.lastModified()))
@@ -287,7 +325,7 @@ case class Clean(clazzs: Array[ClazzItem]) {
 
 object Main {
   def main(args: Array[String]): Unit = {
-    Args.option("m", hasArg = true, "Mode : P[ick] | W[atch]")
+    Args.option("m", hasArg = true, "Mode : P[ick] | W[atch] | G[it]")
     Args.parse(args)
 
     val mode = Args.getOptionValue("m").toLowerCase()
@@ -296,7 +334,7 @@ object Main {
         Args.option("lib", true, "To Update Jar Lib Dir", null)
         Args.option("dir", true, "Class File Dir")
         Args.option("rm", false, "Need Remove Class File")
-        Args.option("deep", true, "Scan Dir Deep", "1")
+        Args.option("deep", true, "Scan Lib Deep", "1")
         Args.parse(args)
         val libs = Args.getOptionAsPaths("lib")
         val clazzDir = Args.getOptionAsPath("dir")
@@ -343,6 +381,31 @@ object Main {
               Pack(packs, dir(0)).exec()
           }
         }
+      case "g" =>
+        println("Git Mode")
+        Args.option("libs", true, "To Update Jar Lib Dir", null)
+        Args.option("deep", true, "Scan Lib Deep", "1")
+        Args.option("root", true, "Git Src Root")
+        Args.option("dir", true, "Class File Dir")
+        Args.parse(args)
+        // 首先确定mvn master的差距
+        val root = Args.getOptionAsPath("root")
+        FileUtil.changeWorkDir(root)
+        val diffFiles = new Exec(root).exec("git", "diff", "master", "--stat=256")
+          .dropRight(1).map(s => s.trim.split(" ")(0).replaceAll("\\.((java)|(scala))", ""))
+        // 遍历所有.class文件
+        diffFiles.foreach(println)
+        //        val libs = Args.getOptionAsPaths("lib")
+        val clazzDir = Args.getOptionAsPath("dir")
+        val clazzs = Scan(Array(clazzDir)).exec().filter(c => {
+          val prefix = c.getClassPrefix
+          diffFiles.exists(s => prefix.endsWith(s) || s.endsWith(prefix))
+        })
+        val libs = Args.getOptionAsPaths("libs")
+        val deep = Args.getOptionValue("deep").toInt
+        val jars = Lib(libs, deep).exec()
+        val packs = JoinPackItems(clazzs, jars).exec()
+        Pack(packs, clazzDir).exec()
       case _ => Args.printUsage()
     }
   }

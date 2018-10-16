@@ -9,6 +9,7 @@ import java.net.URL
 import java.net.URLDecoder
 
 object Kit {
+
   def execs(cmd: String): Stream[String] = {
     println(cmd)
     val ex = Runtime.getRuntime.exec(cmd); //添加要进行的命令，"cmd  /c
@@ -16,7 +17,7 @@ object Kit {
     Stream.continually(br.readLine()).takeWhile(_ != null)
   }
 
-  def exec(cmd: String): Array[String] = {
+  def exec(cmd: String, args: String*): Array[String] = {
     val res = exec2(cmd)
     if (res._2.length > 0) {
       throw new Exception(res._2.mkString("\n"))
@@ -24,9 +25,12 @@ object Kit {
     res._1
   }
 
-  def exec2(cmd: String): (Array[String], Array[String]) = {
+  def exec2(cmd: String, dir: String = System.getProperty("user.dir")): (Array[String], Array[String]) = {
     println(cmd)
-    val ex = Runtime.getRuntime.exec(cmd); //添加要进行的命令，"cmd  /c
+    val pb = new ProcessBuilder(cmd)
+    pb.directory(new File(dir))
+    pb.start()
+    val ex = pb.start(); //添加要进行的命令，"cmd  /c
     val out = {
       val br = new BufferedReader(new InputStreamReader(ex.getInputStream)) //虽然cmd命令可以直接输出，但是通过IO流技术可以保证对数据进行一个缓冲。
       Stream.continually(br.readLine()).takeWhile(_ != null).toArray
