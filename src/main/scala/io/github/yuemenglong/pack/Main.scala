@@ -397,14 +397,13 @@ object Main {
         Args.parse(args)
         // 首先确定mvn master的差距
         val root = Args.getOptionAsPath("root")
-        FileUtil.changeWorkDir(root)
         val diffFiles = new Exec(root).exec("git", "diff", "master", "--stat=1024")
           .dropRight(1).map(s => s.trim.split(" ")(0).replaceAll("\\.((java)|(scala))", ""))
         // 遍历所有.class文件
         diffFiles.foreach(println)
         //        val libs = Args.getOptionAsPaths("lib")
-        val clazzDir = Args.getOptionAsPath("dir")
-        val clazzs = Scan(Array(clazzDir)).exec().filter(c => {
+        val clazzDir = Args.getOptionAsPaths("dir")
+        val clazzs = Scan(clazzDir).exec().filter(c => {
           val prefix = c.getClassPrefix
           diffFiles.exists(s => prefix.endsWith(s) || s.endsWith(prefix))
         })
@@ -419,7 +418,7 @@ object Main {
         })
         val jars = origJars.map(_.toTarget(target))
         val packs = JoinPackItems(clazzs, jars).exec()
-        Pack(packs, clazzDir).exec()
+        Pack(packs, target).exec()
       case _ => Args.printUsage()
     }
   }
