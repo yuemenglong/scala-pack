@@ -1,7 +1,7 @@
 package io.github.yuemenglong.pack
 
 import java.io._
-import java.nio.file.Files
+import java.nio.file.{Files, Paths}
 import java.util.jar.JarFile
 import java.util.zip.{ZipEntry, ZipInputStream, ZipOutputStream}
 
@@ -17,7 +17,13 @@ trait GetPkg {
   val pkg: String = clazz.split("/").dropRight(1).mkString("/")
 }
 
-case class JarItem(clazz: String, jar: String) extends GetPkg
+case class JarItem(clazz: String, jar: String) extends GetPkg {
+  def toTarget(target: String): JarItem = {
+    val name = new File(jar).getName
+    val path = Paths.get(target, name).toString
+    JarItem(clazz, path)
+  }
+}
 
 case class ClazzItem(file: String, clazz: String) extends GetPkg {
   def getClassPrefix: String = {
@@ -383,7 +389,8 @@ object Main {
         }
       case "g" =>
         println("Git Mode")
-        Args.option("libs", true, "To Update Jar Lib Dir", null)
+        Args.option("origin", true, "To Update Jar Lib Dir", null)
+        Args.option("target", true, "Put Updated Jar To", null)
         Args.option("deep", true, "Scan Lib Deep", "1")
         Args.option("root", true, "Git Src Root")
         Args.option("dir", true, "Class File Dir")
@@ -391,7 +398,7 @@ object Main {
         // 首先确定mvn master的差距
         val root = Args.getOptionAsPath("root")
         FileUtil.changeWorkDir(root)
-        val diffFiles = new Exec(root).exec("git", "diff", "master", "--stat=256")
+        val diffFiles = new Exec(root).exec("git", "diff", "master", "--stat=1024")
           .dropRight(1).map(s => s.trim.split(" ")(0).replaceAll("\\.((java)|(scala))", ""))
         // 遍历所有.class文件
         diffFiles.foreach(println)
@@ -401,9 +408,16 @@ object Main {
           val prefix = c.getClassPrefix
           diffFiles.exists(s => prefix.endsWith(s) || s.endsWith(prefix))
         })
-        val libs = Args.getOptionAsPaths("libs")
+        val origin = Args.getOptionAsPath("origin")
+        val target = Args.getOptionAsPath("target")
         val deep = Args.getOptionValue("deep").toInt
-        val jars = Lib(libs, deep).exec()
+        val origJars = Lib(Array(origin), deep).exec()
+        // 复制到target
+        origJars.map(_.jar).toSet[String].foreach(p => {
+          println(s"Move To Target: ${p}")
+          FileUtils.copyFileToDirectory(new File(p), new File(target))
+        })
+        val jars = origJars.map(_.toTarget(target))
         val packs = JoinPackItems(clazzs, jars).exec()
         Pack(packs, clazzDir).exec()
       case _ => Args.printUsage()
